@@ -379,6 +379,30 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
+
+owner_lock = False
+
+@bot.command()
+async def ownerlock(ctx):
+    global owner_lock
+    if ctx.author.id != 1281497404931051541:
+        return
+
+    owner_lock = not owner_lock
+
+    if owner_lock:
+        await ctx.reply("🔒 Owner lock enabled. Only the bot owner can use commands.")
+    else:
+        await ctx.reply("🔓 Owner lock disabled. Everyone can use commands again.")
+
+
+@bot.check
+async def global_command_check(ctx):
+    if owner_lock and ctx.author.id != 1281497404931051541:
+        return False
+    return True
+
+
 # Flask Keep Alive
 app = Flask('')
 
