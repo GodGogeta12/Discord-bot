@@ -433,6 +433,58 @@ async def on_ready():
         restart_channel = None
         restart_user = None
 
+@bot.command()
+async def servers(ctx):
+    if ctx.author.id != OWNER_ID:
+        return
+
+    if not bot.guilds:
+        return await ctx.send("❌ Bot isn't in any servers.")
+
+    embed = discord.Embed(title="🌐 Servers I'm In", color=0x7289DA)
+
+    for i, guild in enumerate(bot.guilds, 1):
+        member_count = guild.member_count
+        embed.add_field(
+            name=f"{i}. {guild.name}",
+            value=f"Members: {member_count}\nID: {guild.id}",
+            inline=False
+        )
+
+    embed.set_footer(text=f"Total: {len(bot.guilds)} servers | Use -invite <number> to get an invite")
+    await ctx.send(embed=embed)
+
+
+@bot.command()
+async def invite(ctx, number: int = None):
+    if ctx.author.id != OWNER_ID:
+        return
+
+    if not number:
+        return await ctx.send("Usage: `-invite <number>` (get the number from `-servers`)")
+
+    guilds = list(bot.guilds)
+
+    if number < 1 or number > len(guilds):
+        return await ctx.send(f"❌ Invalid number. Use 1-{len(guilds)}")
+
+    guild = guilds[number - 1]
+
+    # Try to create an invite from the first available text channel
+    invite_link = None
+    for channel in guild.text_channels:
+        try:
+            inv = await channel.create_invite(max_age=3600, max_uses=1, unique=True)
+            invite_link = inv.url
+            break
+        except:
+            continue
+
+    if invite_link:
+        await ctx.send(f"🔗 Invite to **{guild.name}**: {invite_link}\n(Expires in 1 hour, 1 use)")
+    else:
+        await ctx.send(f"❌ Couldn't create an invite for **{guild.name}**. Bot may not have Create Invite permission there.")
+
 
 # Flask Keep Alive
 app = Flask('')
