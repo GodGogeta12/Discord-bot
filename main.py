@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 import asyncio
 import os
+import sys
 import threading
 from flask import Flask
 
@@ -401,6 +402,36 @@ async def global_command_check(ctx):
     if owner_lock and ctx.author.id != 1281497404931051541:
         return False
     return True
+
+restart_channel = None
+restart_user = None
+
+
+@bot.command()
+async def restart(ctx):
+    global restart_channel, restart_user
+    if ctx.author.id != 1281497404931051541:
+        return
+
+    restart_channel = ctx.channel.id
+    restart_user = ctx.author.id
+
+    await ctx.reply("🔄 Restarting bot...")
+    os.execv(sys.executable, ['python'] + sys.argv)
+
+
+@bot.event
+async def on_ready():
+    global restart_channel, restart_user
+
+    print(f"Logged in as {bot.user}")
+
+    if restart_channel and restart_user:
+        channel = bot.get_channel(restart_channel)
+        if channel:
+            await channel.send(f"✅ <@{restart_user}> The bot has fully restarted and is back online.")
+        restart_channel = None
+        restart_user = None
 
 
 # Flask Keep Alive
