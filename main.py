@@ -14,6 +14,7 @@ warnings_data = {}
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 bot = commands.Bot(command_prefix="-", intents=intents, help_command=None)
 
 welcome_settings = {}
@@ -85,9 +86,19 @@ def save_warnings():
 load_settings()
 load_warnings()
 
+restart_channel = None
+restart_user = None
+
 @bot.event
 async def on_ready():
+    global restart_channel, restart_user
     print(f"Bot logged in as {bot.user}")
+    if restart_channel and restart_user:
+        channel = bot.get_channel(restart_channel)
+        if channel:
+            await channel.send(f"✅ <@{restart_user}> The bot has fully restarted and is back online.")
+        restart_channel = None
+        restart_user = None
 
 @bot.event
 async def on_member_join(member):
@@ -164,7 +175,6 @@ async def dmc(ctx, user: discord.User = None):
     
     history = dm_history.get(user.id, [])
     history_text = "\n".join(history[-15:]) if history else "No previous messages found."
-        
     embed = discord.Embed(title="Recent DMs with", description=f"**{user.name}#{user.discriminator}**\nUser ID: {user.id}\n\n**Last Messages:**\n{history_text}", color=0x2ecc71)
     await ctx.send(embed=embed)
     
@@ -254,7 +264,6 @@ async def role(ctx, action: str = None, user: discord.Member = None, role: disco
 async def warn(ctx, user: discord.Member = None, *, reason: str = "No reason provided"):
     if ctx.author.id != OWNER_ID: return
     if not user: return await ctx.send("Usage: `-warn @user [reason]`")
-    
     warnings_data.setdefault(user.id, []).append(reason)
     save_warnings()
     await ctx.send(f"⚠️ **{user.display_name}** has been warned. Reason: {reason}")
@@ -267,11 +276,9 @@ async def warn(ctx, user: discord.Member = None, *, reason: str = "No reason pro
 async def warnings(ctx, user: discord.Member = None):
     if ctx.author.id != OWNER_ID: return
     if not user: return await ctx.send("Usage: `-warnings @user`")
-    
     user_warnings = warnings_data.get(user.id, [])
     if not user_warnings:
         return await ctx.send(f"**{user.display_name}** has no warnings.")
-    
     warn_list = "\n".join([f"{i+1}. {r}" for i, r in enumerate(user_warnings)])
     await ctx.send(f"**Warnings for {user.display_name}:**\n{warn_list}")
 
@@ -279,7 +286,6 @@ async def warnings(ctx, user: discord.Member = None):
 async def clearwarnings(ctx, user: discord.Member = None):
     if ctx.author.id != OWNER_ID: return
     if not user: return await ctx.send("Usage: `-clearwarnings @user`")
-    
     if user.id in warnings_data:
         del warnings_data[user.id]
         save_warnings()
@@ -291,29 +297,22 @@ async def clearwarnings(ctx, user: discord.Member = None):
 async def poll_command(ctx, *, content: str = None):
     if ctx.author.id != OWNER_ID: return
     if not content: return await ctx.send("Usage: `-poll Question | Option1 | Option2...`")
-    
     try: 
         await ctx.message.delete()
     except: 
         pass
-
     parts = [p.strip() for p in content.split("|")]
     if len(parts) < 2: return
-    
     question = parts[0]
     options = parts[1:]
-    
     if len(options) > 10:
         return await ctx.send("Max 10 options.")
-
     reactions = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
     description = ""
     for i, option in enumerate(options):
         description += f"{reactions[i]} {option}\n"
-        
     embed = discord.Embed(title=f"📊 {question}", description=description, color=0x3498db)
     poll_msg = await ctx.send(embed=embed)
-    
     for i in range(len(options)):
         await poll_msg.add_reaction(reactions[i])
 
@@ -351,6 +350,79 @@ async def link(ctx):
     except:
         await ctx.send(f"❌ Couldn't send DM. Here it is: {invite_url}")
 
+@bot.command()
+async def servers(ctx):
+    if ctx.author.id != OWNER_ID: return
+    guilds = bot.guilds
+    if not guilds:
+        await ctx.send("The bot is not in any servers.")
+        return
+    server_list = "\n".join([f"{i+1}. {g.name} ({g.id})" for i, g in enumerate(guilds)])
+    await ctx.send(f"**Servers I'm in:**\n{server_list}\n\nType the number of the server.")
+    
+    def check(m):
+        return m.author == ctx.author and m.channel == ctx.channel
+    
+    try:
+        msg = await bot.wait_for('message', check=check, timeout=60.0)
+        try:
+            index = int(msg.content) - 1
+            selected_guild = guilds[index]
+        except (ValueError, IndexError):
+            await ctx.send("Invalid selection.")
+            return
+    except asyncio.TimeoutError:
+        await ctx.send("Timed out.")
+        return
+    
+    await ctx.send(f"Would you like me to leave **{selected_guild.name}** or invite you? (Type: leave or invite)")
+    
+    try:
+        action_msg = await bot.wait_for('message', check=check, timeout=60.0)
+        action = action_msg.content.lower()
+        
+        if action == "leave":
+            await selected_guild.leave()
+            await ctx.send(f"✅ Left **{selected_guild.name}**.")
+        elif action == "invite":
+            invite = await selected_guild.text_channels[0].create_invite(max_uses=1, max_age=3600)
+            await ctx.send(f"✅ Invite link: {invite}")
+        else:
+            await ctx.send("Invalid action. Say 'leave' or 'invite'.")
+    except asyncio.TimeoutError:
+        await ctx.send("Timed out.")
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
+@bot.command()
+async def restart(ctx):
+    global restart_channel, restart_user
+    if ctx.author.id != OWNER_ID:
+        return
+    restart_channel = ctx.channel.id
+    restart_user = ctx.author.id
+    await ctx.reply("🔄 Restarting bot...")
+    os.execv(sys.executable, ['python'] + sys.argv)
+
+owner_lock = False
+
+@bot.command()
+async def ownerlock(ctx):
+    global owner_lock
+    if ctx.author.id != OWNER_ID:
+        return
+    owner_lock = not owner_lock
+    if owner_lock:
+        await ctx.reply("🔒 Owner lock enabled. Only the bot owner can use commands.")
+    else:
+        await ctx.reply("🔓 Owner lock disabled. Everyone can use commands again.")
+
+@bot.check
+async def global_command_check(ctx):
+    if owner_lock and ctx.author.id != OWNER_ID:
+        return False
+    return True
+
 @bot.event
 async def on_message(message):
     if message.author.bot and message.author != bot.user: 
@@ -380,165 +452,6 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-
-owner_lock = False
-
-@bot.command()
-async def ownerlock(ctx):
-    global owner_lock
-    if ctx.author.id != 1281497404931051541:
-        return
-
-    owner_lock = not owner_lock
-
-    if owner_lock:
-        await ctx.reply("🔒 Owner lock enabled. Only the bot owner can use commands.")
-    else:
-        await ctx.reply("🔓 Owner lock disabled. Everyone can use commands again.")
-
-
-@bot.check
-async def global_command_check(ctx):
-    if owner_lock and ctx.author.id != 1281497404931051541:
-        return False
-    return True
-
-restart_channel = None
-restart_user = None
-
-
-@bot.command()
-async def restart(ctx):
-    global restart_channel, restart_user
-    if ctx.author.id != 1281497404931051541:
-        return
-
-    restart_channel = ctx.channel.id
-    restart_user = ctx.author.id
-
-    await ctx.reply("🔄 Restarting bot...")
-    os.execv(sys.executable, ['python'] + sys.argv)
-
-
-@bot.event
-async def on_ready():
-    global restart_channel, restart_user
-
-    print(f"Logged in as {bot.user}")
-
-    if restart_channel and restart_user:
-        channel = bot.get_channel(restart_channel)
-        if channel:
-            await channel.send(f"✅ <@{restart_user}> The bot has fully restarted and is back online.")
-        restart_channel = None
-        restart_user = None
-
-@bot.command()
-async def servers(ctx):
-    if ctx.author.id != OWNER_ID:
-        return
-
-    if not bot.guilds:
-        return await ctx.send("❌ Bot isn't in any servers.")
-
-    embed = discord.Embed(title="🌐 Servers I'm In", color=0x7289DA)
-
-    for i, guild in enumerate(bot.guilds, 1):
-        member_count = guild.member_count
-        embed.add_field(
-            name=f"{i}. {guild.name}",
-            value=f"Members: {member_count}\nID: {guild.id}",
-            inline=False
-        )
-
-    embed.set_footer(text=f"Total: {len(bot.guilds)} servers | Use -invite <number> to get an invite")
-    await ctx.send(embed=embed)
-
-
-@bot.command()
-async def invite(ctx, number: int = None):
-    if ctx.author.id != OWNER_ID:
-        return
-
-    if not number:
-        return await ctx.send("Usage: `-invite <number>` (get the number from `-servers`)")
-
-    guilds = list(bot.guilds)
-
-    if number < 1 or number > len(guilds):
-        return await ctx.send(f"❌ Invalid number. Use 1-{len(guilds)}")
-
-    guild = guilds[number - 1]
-
-    # Try to create an invite from the first available text channel
-    invite_link = None
-    for channel in guild.text_channels:
-        try:
-            inv = await channel.create_invite(max_age=3600, max_uses=1, unique=True)
-            invite_link = inv.url
-            break
-        except:
-            continue
-
-    if invite_link:
-        await ctx.send(f"🔗 Invite to **{guild.name}**: {invite_link}\n(Expires in 1 hour, 1 use)")
-    else:
-        await ctx.send(f"❌ Couldn't create an invite for **{guild.name}**. Bot may not have Create Invite permission there.")
-
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
-bot = commands.Bot(command_prefix="-", intents=intents, help_command=None)
-
-
-@bot.command()
-async def servers(ctx):
-    if ctx.author.id != OWNER_ID:
-        return
-
-    if not bot.guilds:
-        return await ctx.send("❌ Bot isn't in any servers.")
-
-    msg = ""
-    for i, guild in enumerate(bot.guilds, 1):
-        msg += f"{i}. **{guild.name}** - {guild.member_count} members (ID: {guild.id})\n"
-
-    embed = discord.Embed(title="🌐 Servers I'm In", description=msg, color=0x7289DA)
-    embed.set_footer(text=f"Total: {len(bot.guilds)} servers | Use -invite <number> to get an invite")
-    await ctx.send(embed=embed)
-
-
-@bot.command()
-async def invite(ctx, number: int = None):
-    if ctx.author.id != OWNER_ID:
-        return
-
-    if not number:
-        return await ctx.send("Usage: `-invite <number>` (get the number from `-servers`)")
-
-    guilds = list(bot.guilds)
-
-    if number < 1 or number > len(guilds):
-        return await ctx.send(f"❌ Invalid number. Use 1-{len(guilds)}")
-
-    guild = guilds[number - 1]
-
-    invite_link = None
-    for channel in guild.text_channels:
-        try:
-            inv = await channel.create_invite(max_age=3600, max_uses=1, unique=True)
-            invite_link = inv.url
-            break
-        except:
-            continue
-
-    if invite_link:
-        await ctx.send(f"🔗 Invite to **{guild.name}**: {invite_link}\n(Expires in 1 hour, 1 use)")
-    else:
-        await ctx.send(f"❌ Couldn't create an invite for **{guild.name}**.")
-
-
-# Flask Keep Alive
 app = Flask('')
 
 @app.route('/')
