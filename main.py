@@ -1104,23 +1104,19 @@ class CapsuleShopView(discord.ui.View):
         for num, item in CAPSULE_SHOP.items():
             self.add_item(CapsuleBuyButton(num, item, user_id))
 
-@bot.command(aliases=['cs', 'cshop', 'shop'])
+@bot.command(aliases=['cs','cshop','shop'])
 async def capsuleshop(ctx):
-    """Browse and buy from the Capsule Shop!"""
     user_id = str(ctx.author.id)
-    get_user_data(user_id)
+    data = get_user_data(user_id)
 
-    # Example item (change to your system if needed)
-    item_key = "capsule"
+    item_key = "capsule"  # change to your item key if needed
     price = CAPSULE_ITEMS[item_key]["price"]
 
-    data = get_user_data(user_id)
     max_afford = data["zeni"] // price
 
     await ctx.send(
         f"💰 **Price:** {price:,} Zeni\n"
-        f"🛒 You can afford **{max_afford:,}**\n\n"
-        f"What would you like to buy?",
+        f"🛒 **You can afford:** {max_afford:,}",
         view=BuyAmountView(user_id, item_key)
     )
 
@@ -1133,10 +1129,8 @@ class BuyAmountView(discord.ui.View):
 
         data = get_user_data(user_id)
         price = CAPSULE_ITEMS[item_key]["price"]
-
         self.max_afford = data["zeni"] // price
 
-        # Disable buttons if user can't afford them
         if self.max_afford < 1:
             self.buy1.disabled = True
             self.buymax.disabled = True
@@ -1146,6 +1140,8 @@ class BuyAmountView(discord.ui.View):
             self.buy10000.disabled = True
 
     async def buy(self, interaction, amount):
+        await interaction.response.defer()  # silent button click
+
         data = get_user_data(self.user_id)
         price = CAPSULE_ITEMS[self.item_key]["price"]
 
@@ -1153,28 +1149,16 @@ class BuyAmountView(discord.ui.View):
             amount = self.max_afford
 
         if amount <= 0:
-            await interaction.response.send_message(
-                "❌ You can't afford any.",
-                ephemeral=True
-            )
             return
 
         total = price * amount
 
         if data["zeni"] < total:
-            await interaction.response.send_message(
-                "❌ Not enough Zeni.",
-                ephemeral=True
-            )
             return
 
         data["zeni"] -= total
         data["inventory"][self.item_key] = data["inventory"].get(self.item_key, 0) + amount
 
-        await interaction.response.send_message(
-            f"✅ You bought **{amount:,}x {CAPSULE_ITEMS[self.item_key]['name']}** for **{total:,} Zeni**",
-            ephemeral=True
-        )
 
     @discord.ui.button(label="Buy 1", style=discord.ButtonStyle.secondary)
     async def buy1(self, interaction: discord.Interaction, button: discord.ui.Button):
